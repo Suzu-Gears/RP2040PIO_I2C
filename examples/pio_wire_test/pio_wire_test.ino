@@ -28,11 +28,8 @@ void setup()
   // --- INA219 Configuration using Wire API ---
   uint16_t config_value = 0x399F;
 
-  pioWire.beginTransmission(INA219_ADDR);
-  pioWire.write(0x00); // Config Register
-  pioWire.write((uint8_t)(config_value >> 8));
-  pioWire.write((uint8_t)(config_value & 0xFF));
-  uint8_t error = pioWire.endTransmission();
+  uint8_t config_buf[3] = {0x00, (uint8_t)(config_value >> 8), (uint8_t)(config_value & 0xFF)};
+  bool error = !pioWire.writeDMA(INA219_ADDR, config_buf, sizeof(config_buf));
 
   if (error == 0)
   {
@@ -52,15 +49,14 @@ void loop()
   uint16_t rawBusVoltage = 0;
 
   // --- Read Bus Voltage (0x02) ---
-  pioWire.beginTransmission(INA219_ADDR);
-  pioWire.write(0x02);
-  pioWire.endTransmission(false); // Restart
-
-  size_t bytesRead = pioWire.requestFrom(INA219_ADDR, (size_t)2);
+  uint8_t reg = 0x02;
+  pioWire.writeDMA(INA219_ADDR, &reg, 1, false); // Restart
+  uint8_t rx_buf[2];
+  size_t bytesRead = pioWire.requestFromDMA(INA219_ADDR, rx_buf, sizeof(rx_buf));
   if (bytesRead == 2)
   {
-    uint8_t msb = pioWire.read();
-    uint8_t lsb = pioWire.read();
+    uint8_t msb = rx_buf[0];
+    uint8_t lsb = rx_buf[1];
     rawBusVoltage = (uint16_t)(msb << 8 | lsb);
     float busVoltage = (float)((rawBusVoltage >> 3) * 4);
 
