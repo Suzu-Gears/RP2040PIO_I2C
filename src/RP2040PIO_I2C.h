@@ -6,7 +6,8 @@
 #include "hardware/pio.h"
 #include "i2c.pio.h"
 
-class RP2040PIO_I2C : public TwoWire {
+class RP2040PIO_I2C : public TwoWire
+{
 public:
     RP2040PIO_I2C(PIO pio, uint pin_sda, uint pin_scl, uint sm = 0);
     virtual ~RP2040PIO_I2C();
@@ -48,7 +49,7 @@ private:
     uint8_t _address;
     uint8_t _tx_buffer[256];
     size_t _tx_buffer_len;
-    
+
     uint8_t _rx_buffer[256];
     size_t _rx_buffer_len;
     size_t _rx_buffer_index;

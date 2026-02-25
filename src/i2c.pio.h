@@ -52,7 +52,8 @@ static const struct pio_program i2c_program = {
 #endif
 };
 
-static inline pio_sm_config i2c_program_get_default_config(uint offset) {
+static inline pio_sm_config i2c_program_get_default_config(uint offset)
+{
     pio_sm_config c = pio_get_default_sm_config();
     sm_config_set_wrap(&c, offset + i2c_wrap_target, offset + i2c_wrap);
     sm_config_set_sideset(&c, 2, true, true);
@@ -61,7 +62,8 @@ static inline pio_sm_config i2c_program_get_default_config(uint offset) {
 
 #include "hardware/clocks.h"
 #include "hardware/gpio.h"
-static inline void i2c_program_init(PIO pio, uint sm, uint offset, uint pin_sda, uint pin_scl) {
+static inline void i2c_program_init(PIO pio, uint sm, uint offset, uint pin_sda, uint pin_scl)
+{
     assert(pin_scl == pin_sda + 1);
     pio_sm_config c = i2c_program_get_default_config(offset);
     // IO mapping
@@ -89,8 +91,8 @@ static inline void i2c_program_init(PIO pio, uint sm, uint offset, uint pin_sda,
     pio_sm_set_pins_with_mask(pio, sm, 0, both_pins);
     // Clear IRQ flag before starting, and make sure flag doesn't actually
     // assert a system-level interrupt (we're using it as a status flag)
-    pio_set_irq0_source_enabled(pio, (enum pio_interrupt_source) ((uint) pis_interrupt0 + sm), false);
-    pio_set_irq1_source_enabled(pio, (enum pio_interrupt_source) ((uint) pis_interrupt0 + sm), false);
+    pio_set_irq0_source_enabled(pio, (enum pio_interrupt_source)((uint)pis_interrupt0 + sm), false);
+    pio_set_irq1_source_enabled(pio, (enum pio_interrupt_source)((uint)pis_interrupt0 + sm), false);
     pio_interrupt_clear(pio, sm);
     // Configure and start SM
     pio_sm_init(pio, sm, offset + i2c_offset_entry_point, &c);
@@ -108,7 +110,7 @@ static inline void i2c_program_init(PIO pio, uint sm, uint offset, uint pin_sda,
 #define set_scl_sda_pio_version 0
 
 static const uint16_t set_scl_sda_program_instructions[] = {
-            //     .wrap_target
+    //     .wrap_target
     0xf780, //  0: set    pindirs, 0      side 0 [7]
     0xf781, //  1: set    pindirs, 1      side 0 [7]
     0xff80, //  2: set    pindirs, 0      side 1 [7]
@@ -127,7 +129,8 @@ static const struct pio_program set_scl_sda_program = {
 #endif
 };
 
-static inline pio_sm_config set_scl_sda_program_get_default_config(uint offset) {
+static inline pio_sm_config set_scl_sda_program_get_default_config(uint offset)
+{
     pio_sm_config c = pio_get_default_sm_config();
     sm_config_set_wrap(&c, offset + set_scl_sda_wrap_target, offset + set_scl_sda_wrap);
     sm_config_set_sideset(&c, 2, true, false);
@@ -135,7 +138,8 @@ static inline pio_sm_config set_scl_sda_program_get_default_config(uint offset) 
 }
 
 // Define order of our instruction table
-enum {
+enum
+{
     I2C_SC0_SD0 = 0,
     I2C_SC0_SD1,
     I2C_SC1_SD0,
@@ -143,4 +147,3 @@ enum {
 };
 
 #endif
-

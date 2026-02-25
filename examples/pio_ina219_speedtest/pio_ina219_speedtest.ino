@@ -14,7 +14,7 @@ RP2040PIO_I2C pioWire(pio0, PIN_SDA, PIN_SCL);
 const uint8_t INA219_ADDR = 0x40;
 
 // テストするI2C周波数
-const uint32_t I2C_FREQ = 2560000;
+const uint32_t I2C_FREQ = 2560000; // 2.56 MHz (36kHzで読み取り実行できた)
 
 void setup()
 {
