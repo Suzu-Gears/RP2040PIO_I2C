@@ -64,7 +64,12 @@ static inline pio_sm_config i2c_program_get_default_config(uint offset)
 #include "hardware/gpio.h"
 static inline void i2c_program_init(PIO pio, uint sm, uint offset, uint pin_sda, uint pin_scl)
 {
-    assert(pin_scl == pin_sda + 1);
+    // PIO命令のカスタマイズ:
+    // SCL待ち命令を相対ピン待ちから絶対GPIO待ち(wait 1 gpio, pin_scl)に動的設定。
+    // これにより、SDAとSCLが隣接しているかに関わらず、完全に任意のGPIOピン同士でI2C通信が可能になります。
+    pio->instr_mem[offset + 5] = 0x2480 | (pin_scl & 0x1f);  // wait 1 gpio, pin_scl [4]
+    pio->instr_mem[offset + 10] = 0x2780 | (pin_scl & 0x1f); // wait 1 gpio, pin_scl [7]
+
     pio_sm_config c = i2c_program_get_default_config(offset);
     // IO mapping
     sm_config_set_out_pins(&c, pin_sda, 1);
