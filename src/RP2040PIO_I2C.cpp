@@ -1,5 +1,6 @@
 #include "RP2040PIO_I2C.h"
 #include "hardware/clocks.h"
+#include "hardware/dma.h"
 
 static const int PIO_I2C_ICOUNT_LSB = 10;
 static const int PIO_I2C_FINAL_LSB = 9;
@@ -238,6 +239,188 @@ size_t RP2040PIO_I2C::requestFrom(uint8_t address, size_t quantity, bool sendSto
     return _rx_buffer_len;
 }
 
+bool RP2040PIO_I2C::writeDMA(uint8_t address, const uint8_t *data, size_t quantity, bool sendStop)
+{
+    int err = 0;
+    uint16_t *dma_words = nullptr;
+
+    if (quantity)
+    {
+        dma_words = (uint16_t *)malloc(quantity * sizeof(uint16_t));
+        if (dma_words)
+        {
+            for (size_t i = 0; i < quantity; i++)
+            {
+                bool last = (i == quantity - 1);
+                dma_words[i] = (data[i] << PIO_I2C_DATA_LSB) | (last << PIO_I2C_FINAL_LSB) | 1u;
+            }
+        }
+    }
+
+    if (_in_transaction)
+    {
+        pio_i2c_repstart();
+    }
+    else
+    {
+        pio_i2c_start();
+    }
+    _in_transaction = true;
+
+    pio_i2c_rx_enable(false);
+    pio_i2c_put16((address << 2) | 1u);
+
+    if (dma_words && quantity)
+    {
+        if (!pio_i2c_dma_write_words(dma_words, quantity))
+            err = 2;
+    }
+    else
+    {
+        for (size_t i = 0; i < quantity; i++)
+        {
+            if (pio_i2c_check_error())
+                break;
+
+            bool last = (i == quantity - 1);
+            pio_i2c_put_or_err((data[i] << PIO_I2C_DATA_LSB) | (last << PIO_I2C_FINAL_LSB) | 1u);
+        }
+    }
+
+    free(dma_words);
+
+    if (sendStop)
+    {
+        pio_i2c_stop();
+        _in_transaction = false;
+    }
+
+    pio_i2c_wait_idle();
+
+    if (pio_i2c_check_error())
+    {
+        err = 2;
+        pio_i2c_resume_after_error();
+        if (sendStop)
+        {
+            pio_i2c_stop();
+            _in_transaction = false;
+        }
+    }
+
+    return err == 0;
+}
+
+size_t RP2040PIO_I2C::requestFromDMA(uint8_t address, uint8_t *data, size_t quantity, bool sendStop)
+{
+    _rx_buffer_len = 0;
+    _rx_buffer_index = 0;
+
+    uint16_t *tx_words = nullptr;
+    uint8_t *rx_words = nullptr;
+    bool dma_ok = false;
+
+    if (quantity)
+    {
+        tx_words = (uint16_t *)malloc(quantity * sizeof(uint16_t));
+        rx_words = (uint8_t *)malloc((quantity + 1) * sizeof(uint8_t));
+        if (tx_words && rx_words)
+        {
+            for (size_t i = 0; i < quantity; i++)
+            {
+                tx_words[i] = (0xffu << 1) | (i + 1 < quantity ? 0 : (1u << PIO_I2C_FINAL_LSB) | (1u << PIO_I2C_NAK_LSB));
+            }
+            dma_ok = true;
+        }
+    }
+
+    if (_in_transaction)
+    {
+        pio_i2c_repstart();
+    }
+    else
+    {
+        pio_i2c_start();
+    }
+    _in_transaction = true;
+
+    pio_i2c_rx_enable(true);
+    while (!pio_sm_is_rx_fifo_empty(_pio, _sm))
+        (void)pio_i2c_get();
+    pio_i2c_put16((address << 2) | 3u);
+
+    if (dma_ok)
+    {
+        dma_ok = pio_i2c_dma_transfer(tx_words, quantity, rx_words, quantity + 1);
+        if (dma_ok)
+        {
+            for (size_t i = 0; i < quantity; i++)
+            {
+                uint8_t value = rx_words[i + 1];
+                if (data)
+                    data[i] = value;
+                if (_rx_buffer_len < sizeof(_rx_buffer))
+                    _rx_buffer[_rx_buffer_len++] = value;
+            }
+        }
+    }
+
+    if (!dma_ok)
+    {
+        uint32_t tx_remain = (uint32_t)quantity;
+        uint32_t rx_remain = (uint32_t)quantity;
+        bool first = true;
+
+        while ((tx_remain || rx_remain) && !pio_i2c_check_error())
+        {
+            if (tx_remain && !pio_sm_is_tx_fifo_full(_pio, _sm))
+            {
+                --tx_remain;
+                pio_i2c_put16((0xffu << 1) | (tx_remain ? 0 : (1u << PIO_I2C_FINAL_LSB) | (1u << PIO_I2C_NAK_LSB)));
+            }
+            if (!pio_sm_is_rx_fifo_empty(_pio, _sm))
+            {
+                if (first)
+                {
+                    (void)pio_i2c_get();
+                    first = false;
+                }
+                else
+                {
+                    uint8_t value = pio_i2c_get();
+                    if (data && (quantity - rx_remain) < quantity)
+                        data[quantity - rx_remain] = value;
+                    if (_rx_buffer_len < sizeof(_rx_buffer))
+                        _rx_buffer[_rx_buffer_len++] = value;
+                    --rx_remain;
+                }
+            }
+        }
+    }
+
+    free(rx_words);
+    free(tx_words);
+
+    if (sendStop)
+    {
+        pio_i2c_stop();
+        _in_transaction = false;
+    }
+    pio_i2c_wait_idle();
+
+    if (pio_i2c_check_error())
+    {
+        pio_i2c_resume_after_error();
+        if (sendStop)
+        {
+            pio_i2c_stop();
+            _in_transaction = false;
+        }
+    }
+
+    return _rx_buffer_len;
+}
+
 int RP2040PIO_I2C::available()
 {
     return _rx_buffer_len - _rx_buffer_index;
@@ -340,4 +523,64 @@ void RP2040PIO_I2C::pio_i2c_wait_idle()
     _pio->fdebug = 1u << (PIO_FDEBUG_TXSTALL_LSB + _sm);
     while (!(_pio->fdebug & 1u << (PIO_FDEBUG_TXSTALL_LSB + _sm) || pio_i2c_check_error()))
         tight_loop_contents();
+}
+
+bool RP2040PIO_I2C::pio_i2c_dma_write_words(const uint16_t *data, size_t count)
+{
+    if (!count)
+        return true;
+
+    int chan = dma_claim_unused_channel(false);
+    if (chan < 0)
+        return false;
+
+    dma_channel_config cfg = dma_channel_get_default_config((uint)chan);
+    channel_config_set_transfer_data_size(&cfg, DMA_SIZE_16);
+    channel_config_set_read_increment(&cfg, true);
+    channel_config_set_write_increment(&cfg, false);
+    channel_config_set_dreq(&cfg, pio_get_dreq(_pio, _sm, true));
+    dma_channel_configure((uint)chan, &cfg, &_pio->txf[_sm], data, (uint)count, true);
+    dma_channel_wait_for_finish_blocking((uint)chan);
+    dma_channel_unclaim((uint)chan);
+
+    return !pio_i2c_check_error();
+}
+
+bool RP2040PIO_I2C::pio_i2c_dma_transfer(const uint16_t *tx_data, size_t tx_count, uint8_t *rx_data, size_t rx_count)
+{
+    if (!tx_count && !rx_count)
+        return true;
+
+    int tx_chan = dma_claim_unused_channel(false);
+    int rx_chan = dma_claim_unused_channel(false);
+    if (tx_chan < 0 || rx_chan < 0)
+    {
+        if (tx_chan >= 0)
+            dma_channel_unclaim((uint)tx_chan);
+        if (rx_chan >= 0)
+            dma_channel_unclaim((uint)rx_chan);
+        return false;
+    }
+
+    dma_channel_config tx_cfg = dma_channel_get_default_config((uint)tx_chan);
+    channel_config_set_transfer_data_size(&tx_cfg, DMA_SIZE_16);
+    channel_config_set_read_increment(&tx_cfg, true);
+    channel_config_set_write_increment(&tx_cfg, false);
+    channel_config_set_dreq(&tx_cfg, pio_get_dreq(_pio, _sm, true));
+    dma_channel_configure((uint)tx_chan, &tx_cfg, &_pio->txf[_sm], tx_data, (uint)tx_count, false);
+
+    dma_channel_config rx_cfg = dma_channel_get_default_config((uint)rx_chan);
+    channel_config_set_transfer_data_size(&rx_cfg, DMA_SIZE_8);
+    channel_config_set_read_increment(&rx_cfg, false);
+    channel_config_set_write_increment(&rx_cfg, true);
+    channel_config_set_dreq(&rx_cfg, pio_get_dreq(_pio, _sm, false));
+    dma_channel_configure((uint)rx_chan, &rx_cfg, rx_data, &_pio->rxf[_sm], (uint)rx_count, false);
+
+    dma_start_channel_mask((1u << tx_chan) | (1u << rx_chan));
+    dma_channel_wait_for_finish_blocking((uint)tx_chan);
+    dma_channel_wait_for_finish_blocking((uint)rx_chan);
+
+    dma_channel_unclaim((uint)tx_chan);
+    dma_channel_unclaim((uint)rx_chan);
+    return !pio_i2c_check_error();
 }

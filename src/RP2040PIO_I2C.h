@@ -27,6 +27,8 @@ public:
 
     size_t requestFrom(uint8_t address, size_t quantity, bool sendStop) override;
     size_t requestFrom(uint8_t address, size_t quantity) override { return requestFrom(address, quantity, true); }
+    bool writeDMA(uint8_t address, const uint8_t *data, size_t quantity, bool sendStop = true);
+    size_t requestFromDMA(uint8_t address, uint8_t *data, size_t quantity, bool sendStop = true);
 
     int available() override;
     int read() override;
@@ -65,6 +67,8 @@ private:
     void pio_i2c_put16(uint16_t data);
     uint8_t pio_i2c_get();
     void pio_i2c_wait_idle();
+    bool pio_i2c_dma_write_words(const uint16_t *data, size_t count);
+    bool pio_i2c_dma_transfer(const uint16_t *tx_data, size_t tx_count, uint8_t *rx_data, size_t rx_count);
 };
 
 #endif // RP2040PIO_I2C_H
