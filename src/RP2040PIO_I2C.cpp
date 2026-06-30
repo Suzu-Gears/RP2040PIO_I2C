@@ -10,7 +10,7 @@ RP2040PIO_I2C::RP2040PIO_I2C(PIO pio, uint pin_sda, uint pin_scl, uint sm)
     : TwoWire(i2c0, pin_sda, pin_scl),
       _pio(pio), _sm(sm), _pin_sda(pin_sda), _pin_scl(pin_scl),
       _offset(0), _clock_freq(100000), _initialized(false), _in_transaction(false),
-      _tx_buffer_len(0), _rx_buffer_len(0), _rx_buffer_index(0)
+      _tx_buffer_len(0), _tx_buffer_overflow(false), _rx_buffer_len(0), _rx_buffer_index(0)
 {
 }
 
@@ -85,11 +85,23 @@ void RP2040PIO_I2C::beginTransmission(uint8_t address)
 {
     _address = address;
     _tx_buffer_len = 0;
+    _tx_buffer_overflow = false;
 }
 
 uint8_t RP2040PIO_I2C::endTransmission(bool sendStop)
 {
     int err = 0;
+    if (_tx_buffer_overflow)
+    {
+        if (sendStop && _in_transaction)
+        {
+            pio_i2c_stop();
+            _in_transaction = false;
+        }
+        _tx_buffer_len = 0;
+        _tx_buffer_overflow = false;
+        return 1; // Data too long to fit in transmit buffer
+    }
 
     if (_in_transaction)
     {
@@ -135,6 +147,7 @@ uint8_t RP2040PIO_I2C::endTransmission(bool sendStop)
     }
 
     _tx_buffer_len = 0;
+    _tx_buffer_overflow = false;
     return err;
 }
 
@@ -145,6 +158,7 @@ size_t RP2040PIO_I2C::write(uint8_t data)
         _tx_buffer[_tx_buffer_len++] = data;
         return 1;
     }
+    _tx_buffer_overflow = true;
     return 0;
 }
 
@@ -163,6 +177,9 @@ size_t RP2040PIO_I2C::write(const uint8_t *data, size_t quantity)
 
 size_t RP2040PIO_I2C::requestFrom(uint8_t address, size_t quantity, bool sendStop)
 {
+    if (quantity > sizeof(_rx_buffer))
+        quantity = sizeof(_rx_buffer);
+
     _rx_buffer_len = 0;
     _rx_buffer_index = 0;
 

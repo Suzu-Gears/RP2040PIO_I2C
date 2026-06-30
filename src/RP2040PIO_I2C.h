@@ -49,6 +49,7 @@ private:
     uint8_t _address;
     uint8_t _tx_buffer[256];
     size_t _tx_buffer_len;
+    bool _tx_buffer_overflow;
 
     uint8_t _rx_buffer[256];
     size_t _rx_buffer_len;
